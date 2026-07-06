@@ -21,7 +21,7 @@ async function callBackend(path: string, init?: RequestInit): Promise<any> {
       signal: ctrl.signal,
       headers: { "user-agent": "WeatherSafetyOS-MCP/0.1", ...(init?.headers ?? {}) },
     });
-    if (!res.ok) throw new Error(`backend_${res.status}`);
+    if (!res.ok) { const e = new Error(`backend_${res.status}`); (e as any).status = res.status; throw e; }
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -38,6 +38,15 @@ function locQuery(a: Record<string, unknown>): string | null {
   return null;
 }
 const NEED_LOC = "어느 지역인지 알려주세요 — 예: “강남”, “서울 관악구”, “부산 해운대” 같은 지명이면 됩니다.";
+/** 위치 관련 사용자 입력 오류(4xx)를 내부 코드 노출 없이 친절 문구로. 전송/일시 오류(5xx·타임아웃)면 null → 상위 일반 처리. */
+function locFallbackMd(a: Record<string, unknown>, e: unknown): string | null {
+  const st = (e as { status?: number })?.status ?? 0;
+  if (st !== 400 && st !== 404 && st !== 422) return null; // 일시적/전송 오류는 그대로
+  if (a.place && String(a.place).trim()) {
+    return `‘${String(a.place).trim()}’ 위치를 찾지 못했어요. 시·구·동을 붙여 다시 알려주세요 — 예: “대구 수성구”, “서울 관악구 신림동”.` + chips("다른 지명으로 검색");
+  }
+  return "한국 안의 좌표가 아닌 것 같아요 — 위도 33~39, 경도 124~132 범위의 국내 좌표인지 확인해 주세요. 지명(예: “강남”)으로 알려주셔도 됩니다." + chips("지명으로 검색");
+}
 // place | lat | lon 공통 입력 스키마 조각
 const LOC_SCHEMA = {
   place: z.string().optional().describe("지명 (예: 강남, 서울 관악구, 부산 해운대, 제주). 좌표 없이 이걸로 편하게."),
@@ -79,7 +88,11 @@ function renderItems(j: any): string {
     const r = it.risk, card = it.card;
     const head = `**${i === 0 ? "주위험" : "동반"} · ${SEV_KO[r.severity] ?? r.severity} · ${HARM_KO[r.harm] ?? r.harm}**`;
     const lines = [head];
-    if (card?.title) lines.push(`- ${card.title}${card.body ? ` — ${card.body}` : ""}`);
+    if (card?.title) {
+      const t = String(card.title), b = card.body ? String(card.body) : "";
+      // body가 title로 시작하면 중복("지금 즉시… — 지금 즉시…") → body만
+      lines.push(`- ${b && !b.startsWith(t) ? `${t} — ${b}` : b || t}`);
+    }
     if (r.drivers?.length) lines.push(`- _근거: ${r.drivers.slice(0, 3).join(" · ")}_`);
     const sh = r.action?.shelter;
     if (sh) lines.push(`- 🏠 최근접 대피: **${sh.name}** (도보 ${sh.walkMin}분) — [지도](${sh.mapLink ?? ""})`);
@@ -269,5 +282,14 @@ export const TOOLS: ToolDef[] = [
     },
   },
 ];
+
+// 위치 입력 오류(4xx)를 툴 공통으로 친절 처리 — 내부 상태코드가 사용자에게 새지 않도록.
+for (const t of TOOLS) {
+  const orig = t.handler;
+  t.handler = async (a) => {
+    try { return await orig(a); }
+    catch (e) { const md = locFallbackMd(a, e); if (md) return md; throw e; }
+  };
+}
 
 export const TOOL_NAMES = TOOLS.map((t) => t.name);
