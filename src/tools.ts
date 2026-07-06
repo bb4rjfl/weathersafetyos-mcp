@@ -210,6 +210,7 @@ export const TOOLS: ToolDef[] = [
       ageBand: z.enum(AGE_BANDS as unknown as [string, ...string[]]).describe("연령대 (예: 70-79)"),
       feelsLikeC: z.number().optional().describe("체감온도(℃) — 폭염/한파 시나리오"),
       rain1hMm: z.number().optional().describe("시간당 강수량(mm) — 호우"),
+      snowCm: z.number().optional().describe("적설(cm) — 대설·빙판길 교통 시나리오"),
       windMs: z.number().optional().describe("풍속(m/s) — 강풍"),
       waveM: z.number().optional().describe("유의파고(m) — 풍랑"),
       pm10: z.number().optional().describe("미세먼지 PM10(㎍/㎥)"),
@@ -227,8 +228,11 @@ export const TOOLS: ToolDef[] = [
       if (Number.isFinite(Number(a.lon))) persona.lon = Number(a.lon);
       if (a.chronic && a.chronic !== "none") persona.chronic = a.chronic;
       const scenario: any = {};
-      for (const k of ["feelsLikeC", "rain1hMm", "windMs", "waveM", "pm10", "lightningKm"]) if (Number.isFinite(Number(a[k]))) scenario[k] = Number(a[k]);
-      if (scenario.feelsLikeC !== undefined) scenario.hour = 14.5;
+      for (const k of ["feelsLikeC", "rain1hMm", "snowCm", "windMs", "waveM", "pm10", "lightningKm"]) if (Number.isFinite(Number(a[k]))) scenario[k] = Number(a[k]);
+      // 체감온도 미지정 시: 특보 맥락에 맞춘 기본값. ⚠️ 안 하면 코어 기본(≈33.5℃)이 '유령 더위'를 주입해
+      // 미세먼지·강풍 등 비폭염 질의에도 온열질환이 껴 오도됨(비폭염이면 중립 18℃로 열/한파 미발화).
+      if (scenario.feelsLikeC === undefined) scenario.feelsLikeC = a.warning === "heatwave" ? 35 : a.warning === "cold_wave" ? -12 : 18;
+      scenario.hour = 14.5;
       if (a.warning && a.warning !== "none") scenario.warnings = [{ hazard: a.warning, level: "warning" }];
       const j = await callBackend(`/api/simulate?llm=0&impactFast=1`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario, persona }) });
       const md =
