@@ -30,6 +30,20 @@ async function callBackend(path: string, init?: RequestInit): Promise<any> {
 function guard(md: string): string {
   return md.length > MAX_RESPONSE_CHARS ? md.slice(0, MAX_RESPONSE_CHARS) + "\n\n… (이하 생략)" : md;
 }
+/** 위치 쿼리 — 지명(place) 우선, 없으면 좌표. 둘 다 없으면 null. */
+function locQuery(a: Record<string, unknown>): string | null {
+  if (a.place && String(a.place).trim()) return `place=${encodeURIComponent(String(a.place).trim())}`;
+  const lat = Number(a.lat), lon = Number(a.lon);
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return `lat=${lat}&lon=${lon}`;
+  return null;
+}
+const NEED_LOC = "어느 지역인지 알려주세요 — 예: “강남”, “서울 관악구”, “부산 해운대” 같은 지명이면 됩니다.";
+// place | lat | lon 공통 입력 스키마 조각
+const LOC_SCHEMA = {
+  place: z.string().optional().describe("지명 (예: 강남, 서울 관악구, 부산 해운대, 제주). 좌표 없이 이걸로 편하게."),
+  lat: z.number().optional().describe("위도 (place 대신 좌표로 줄 때)"),
+  lon: z.number().optional().describe("경도 (place 대신 좌표로 줄 때)"),
+};
 /** 다음 액션 선택지 칩 푸터(규칙 04) — LLM이 자연스럽게 후속 툴콜하도록 유도 */
 function chips(...items: string[]): string {
   return items.length ? `\n\n---\n다음으로 › ${items.map((c) => `\`${c}\``).join("  ")}` : "";
@@ -105,23 +119,24 @@ export const TOOLS: ToolDef[] = [
     name: "assess_weather_risk",
     annotations: { title: "Assess Personal Weather Risk Now", ...RO, openWorldHint: true, idempotentHint: false },
     description:
-      "Assesses the real-time weather danger at a GPS coordinate in South Korea from a personal-safety point of view. It combines the national weather service's live observation, short-term forecast, official warnings, real-time lightning strikes, marine buoy wave height, flood-prone terrain and the official impact forecast to compute every hazard (heat illness, flood, lightning, strong wind, cold, fine dust, high seas, landslide) and returns the danger level, exactly what to do, and the nearest government shelter. Use for questions like 'is it dangerous here right now?' or 'is it safe to go outside?'. " + SERVICE,
-    inputSchema: { lat: z.number().describe("위도 (예: 37.5665)"), lon: z.number().describe("경도 (예: 126.9780)") },
+      "Assesses the real-time weather danger at a place in South Korea from a personal-safety point of view. Accepts a Korean place name (e.g. Gangnam, Haeundae) or GPS coordinates. It combines the national weather service's live observation, short-term forecast, official warnings, real-time lightning strikes, marine buoy wave height, flood-prone terrain and the official impact forecast to compute every hazard (heat illness, flood, lightning, strong wind, cold, fine dust, high seas, landslide) and returns the danger level, exactly what to do, and the nearest government shelter. Use for questions like 'is it dangerous here right now?' or 'is it safe to go outside?'. " + SERVICE,
+    inputSchema: LOC_SCHEMA,
     handler: async (a) => {
-      const j = await callBackend(`/api/risk?lat=${Number(a.lat)}&lon=${Number(a.lon)}`);
+      const q = locQuery(a); if (!q) return NEED_LOC;
+      const j = await callBackend(`/api/risk?${q}`);
       // 안전 원칙: 실시간 관측이 지연/미확인이면 "위험 없음"으로 오도하지 말고 명확히 보류 안내
       const noObs = j.sources?.ncst === "unavailable" || !Number.isFinite(j.weather?.feelsLikeC);
       const hasActiveWarn = (j.warning?.active ?? []).length > 0;
       if (noObs && !hasActiveWarn && !(j.items ?? []).length) {
         return guard(
-          `## 📍 ${j.location?.adminName ?? `${a.lat}, ${a.lon}`}\n` +
+          `## 📍 ${j.location?.adminName ?? a.place ?? `${a.lat}, ${a.lon}`}\n` +
           `🌤️ 실시간 기상 관측이 잠시 지연되고 있어, 지금은 위험도를 확정하지 못했어요. 잠시 후 다시 확인해 주세요.\n\n` +
           `_생명에 위급한 상황이면 지체 없이 119._` +
           chips("다시 확인", "이 근처 대피소 찾기"),
         );
       }
       const md =
-        `## 📍 ${j.location?.adminName ?? `${a.lat}, ${a.lon}`}\n` +
+        `## 📍 ${j.location?.adminName ?? a.place ?? `${a.lat}, ${a.lon}`}\n` +
         `🌤️ ${j.weatherContext ?? ""}\n\n` +
         `⚠️ **특보**: ${warnLine(j)}\n` +
         ((j.contextNotes ?? []).length ? `🧭 ${j.contextNotes.join(" ")}\n` : "") +
@@ -147,11 +162,13 @@ export const TOOLS: ToolDef[] = [
       lightningKm: z.number().optional().describe("최근접 낙뢰 거리(km)"),
       warning: z.enum(["none", "heatwave", "cold_wave", "heavy_rain", "strong_wind", "high_seas", "typhoon", "heavy_snow", "pm"]).optional().describe("발효 특보"),
       chronic: z.enum(["none", "cardio", "respiratory", "diabetes"]).optional().describe("기저질환"),
-      lat: z.number().optional().describe("위도(선택, 기본 서울)"),
+      place: z.string().optional().describe("지명(선택, 예: 강남/부산 해운대). 기본 서울"),
+      lat: z.number().optional().describe("위도(선택)"),
       lon: z.number().optional().describe("경도(선택)"),
     },
     handler: async (a) => {
       const persona: any = { heg: OCC_TO_HEG[a.occupation as string] ?? "HEG-INDOOR-SAFE", ageBand: a.ageBand, occupationLabel: OCC_KO[a.occupation as string] };
+      if (a.place && String(a.place).trim()) persona.place = String(a.place).trim();
       if (Number.isFinite(Number(a.lat))) persona.lat = Number(a.lat);
       if (Number.isFinite(Number(a.lon))) persona.lon = Number(a.lon);
       if (a.chronic && a.chronic !== "none") persona.chronic = a.chronic;
@@ -173,18 +190,16 @@ export const TOOLS: ToolDef[] = [
     name: "find_nearest_shelter",
     annotations: { title: "Find Nearest Heat/Cold Shelter", ...RO, openWorldHint: true, idempotentHint: true },
     description:
-      "Finds the nearest government-registered public shelter to a GPS coordinate in South Korea — heat-relief shelters and cold-wave shelters from the official 60,000+ nationwide registry — with the shelter name, estimated walking time, and a map link. Use when someone needs a cool or warm place to shelter nearby during extreme heat or cold. " + SERVICE,
-    inputSchema: {
-      lat: z.number().describe("위도"),
-      lon: z.number().describe("경도"),
-      kind: z.enum(["heat", "cold"]).optional().describe("쉼터 종류(heat=무더위/cold=한파), 기본 heat"),
-    },
+      "Finds the nearest government-registered public shelter to a place in South Korea (accepts a Korean place name or GPS coordinates) — heat-relief shelters and cold-wave shelters from the official 60,000+ nationwide registry — with the shelter name, estimated walking time, and a map link. Use when someone needs a cool or warm place to shelter nearby during extreme heat or cold. " + SERVICE,
+    inputSchema: { ...LOC_SCHEMA, kind: z.enum(["heat", "cold"]).optional().describe("쉼터 종류(heat=무더위/cold=한파), 기본 heat") },
     handler: async (a) => {
+      if (!locQuery(a)) return NEED_LOC;
       // 코어 무변경 재사용: 극한 시나리오를 주면 엔진이 최근접 쉼터를 카드에 첨부한다.
       const hot = a.kind === "cold" ? { feelsLikeC: -18, warnings: [{ hazard: "cold_wave", level: "warning" }] } : { feelsLikeC: 40, warnings: [{ hazard: "heatwave", level: "warning" }] };
+      const loc: any = a.place && String(a.place).trim() ? { place: String(a.place).trim() } : { lat: Number(a.lat), lon: Number(a.lon) };
       const j = await callBackend(`/api/simulate`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scenario: { ...hot, hour: 14.5 }, persona: { heg: "HEG-OUT-CONST", ageBand: "70-79", lat: Number(a.lat), lon: Number(a.lon) } }),
+        body: JSON.stringify({ scenario: { ...hot, hour: 14.5 }, persona: { heg: "HEG-OUT-CONST", ageBand: "70-79", ...loc } }),
       });
       const items: any[] = j.items ?? [];
       const sh = items.map((it) => it.risk?.action?.shelter).find(Boolean);
@@ -203,19 +218,20 @@ export const TOOLS: ToolDef[] = [
     name: "official_impact_forecast",
     annotations: { title: "Official Heat/Cold Impact Forecast by Sector", ...RO, openWorldHint: true, idempotentHint: false },
     description:
-      "Returns the national weather service's official impact forecast for heat or cold at a GPS coordinate in South Korea, broken down by occupation sector (general public, health-vulnerable, industry, agriculture, livestock, fisheries). It shows how the government itself rates the same weather at different danger levels for different sectors — e.g. 'agriculture: warning, general public: caution' — which is the basis for personalized safety. Available during active heat/cold advisory periods. " + SERVICE,
+      "Returns the national weather service's official impact forecast for heat or cold at a place in South Korea (accepts a Korean place name or GPS coordinates), broken down by occupation sector (general public, health-vulnerable, industry, agriculture, livestock, fisheries). It shows how the government itself rates the same weather at different danger levels for different sectors — e.g. 'agriculture: warning, general public: caution' — which is the basis for personalized safety. Available during active heat/cold advisory periods. " + SERVICE,
     inputSchema: {
-      lat: z.number().describe("위도"),
-      lon: z.number().describe("경도"),
+      ...LOC_SCHEMA,
       sector: z.enum(Object.keys(OCC_TO_HEG) as [string, ...string[]]).optional().describe("관심 직업 분야(기본 farming)"),
       hazard: z.enum(["heat", "cold"]).optional().describe("폭염(heat)/한파(cold), 기본 heat"),
     },
     handler: async (a) => {
+      if (!locQuery(a)) return NEED_LOC;
       const heg = OCC_TO_HEG[(a.sector as string) ?? "farming"] ?? "HEG-OUT-AGRI";
       const sc = a.hazard === "cold" ? { feelsLikeC: -12, warnings: [{ hazard: "cold_wave", level: "warning" }] } : { feelsLikeC: 35, warnings: [{ hazard: "heatwave", level: "warning" }] };
+      const loc: any = a.place && String(a.place).trim() ? { place: String(a.place).trim() } : { lat: Number(a.lat), lon: Number(a.lon) };
       const j = await callBackend(`/api/simulate`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ scenario: { ...sc, hour: 14.5 }, persona: { heg, ageBand: "60-69", lat: Number(a.lat), lon: Number(a.lon) } }),
+        body: JSON.stringify({ scenario: { ...sc, hour: 14.5 }, persona: { heg, ageBand: "60-69", ...loc } }),
       });
       const oi = j.officialImpact;
       if (!oi) return guard(`## 🏛️ 기상청 공식 영향예보\n📍 ${j.location?.adminName ?? ""}\n\n현재 이 지역에 발효 중인 ${a.hazard === "cold" ? "한파" : "폭염"} 영향예보가 없습니다(비시즌이거나 영향없음 단계).` + chips("지금 이 위치 위험도 보기"));
@@ -236,10 +252,11 @@ export const TOOLS: ToolDef[] = [
     name: "resolve_location",
     annotations: { title: "Resolve Korean Weather Location Codes", ...RO, openWorldHint: false, idempotentHint: true },
     description:
-      "Converts a GPS coordinate into South Korea's four weather-service location identifier systems (village-forecast grid, warning zone, forecast zone, and nearest automatic weather station) plus the administrative district name. Useful to see which warning zone a coordinate belongs to or which observation station is closest. " + SERVICE,
-    inputSchema: { lat: z.number().describe("위도"), lon: z.number().describe("경도") },
+      "Converts a place in South Korea (accepts a Korean place name or GPS coordinates) into the four weather-service location identifier systems (village-forecast grid, warning zone, forecast zone, and nearest automatic weather station) plus the administrative district name. Useful to see which warning zone a place belongs to or which observation station is closest. " + SERVICE,
+    inputSchema: LOC_SCHEMA,
     handler: async (a) => {
-      const j = await callBackend(`/api/resolve?lat=${Number(a.lat)}&lon=${Number(a.lon)}`);
+      const q = locQuery(a); if (!q) return NEED_LOC;
+      const j = await callBackend(`/api/resolve?${q}`);
       const md =
         `## 📍 ${j.adminName ?? ""}\n` +
         `- 동네예보 격자: (${j.grid?.nx}, ${j.grid?.ny})\n` +
