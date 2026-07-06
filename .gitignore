@@ -4,3 +4,6 @@ dist/
 *.log
 npm-debug.log*
 .DS_Store
+
+# 로컬 테스트 스크립트
+_*.mjs

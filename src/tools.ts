@@ -111,6 +111,11 @@ function legalBasis(harm: string, severity: string, w: any): string | null {
   if (harm === "hypothermia" && Number.isFinite(f) && f <= -12) {
     return "한파 대응(고용부 「한랭질환 예방 가이드」): 옥외작업 단축·온열 휴게시간 확보 권고.";
   }
+  const pm10 = Number(w?.pm10); // SRC: EV-0027 대기환경보전법 미세먼지 경보(환경부, L1)
+  if (harm === "respiratory" && Number.isFinite(pm10)) {
+    if (pm10 >= 300) return "미세먼지 경보 기준(대기환경보전법·환경부): PM10 300↑ = **경보** — 외출·실외수업 자제, KF94 마스크 권고.";
+    if (pm10 >= 150) return "미세먼지 주의보 기준(대기환경보전법·환경부): PM10 150↑ = **주의보** — 실외 과격한 운동 자제, 민감군 실내 권고.";
+  }
   return null;
 }
 function renderItems(j: any): string {
@@ -130,7 +135,8 @@ function renderItems(j: any): string {
     const lb = i === 0 ? legalBasis(r.harm, r.severity, w) : null; // 주위험에만 법령 근거
     if (lb) lines.push(`- ⚖️ ${lb}`);
     const sh = r.action?.shelter;
-    if (sh) lines.push(`- 🏠 최근접 대피: **${sh.name}** (도보 ${sh.walkMin}분) — [지도](${sh.mapLink ?? ""})`);
+    // 행안부 공식 등록 쉼터(safetydata DSSP-IF-10942, 6만여 곳) — 단순 최근접 POI 아님을 명시
+    if (sh) lines.push(`- 🏠 **행안부 지정 쉼터** 최근접: **${sh.name}** (도보 ${sh.walkMin}분) — [지도](${sh.mapLink ?? ""})`);
     return lines.join("\n");
   }).join("\n\n");
 }
