@@ -22,13 +22,25 @@ async function callBackend(path: string, init?: RequestInit): Promise<any> {
       headers: { "user-agent": "WeatherSafetyOS-MCP/0.1", ...(init?.headers ?? {}) },
     });
     if (!res.ok) { const e = new Error(`backend_${res.status}`); (e as any).status = res.status; throw e; }
-    return await res.json();
+    const data = await res.json();
+    // 헷갈리는 지명 신호 → 상위 래퍼가 되묻기 렌더로 전환
+    if (data && (data as any).ambiguous) { const e = new Error("ambiguous"); (e as any).ambiguous = data; throw e; }
+    return data;
   } finally {
     clearTimeout(timer);
   }
 }
 function guard(md: string): string {
   return md.length > MAX_RESPONSE_CHARS ? md.slice(0, MAX_RESPONSE_CHARS) + "\n\n… (이하 생략)" : md;
+}
+/** 백엔드가 헷갈리는 지명이라고 응답(ambiguous)하면 어디인지 되묻는다(+GPS 안내). 후보 라벨을 칩으로. */
+function clarifyMd(j: { query?: unknown; candidates?: Array<{ label?: string }> }): string {
+  const labels = (j.candidates ?? []).map((c) => c.label).filter((x): x is string => !!x);
+  return (
+    `## 📍 어디를 말씀하시는 걸까요?\n` +
+    `‘${j.query ?? "그 지명"}’은(는) 여러 곳이 있어요. 아래에서 골라 주세요 — 또는 **정확한 GPS 좌표(위도·경도)** 를 알려주시면 바로 확인해 드릴게요.` +
+    chips(...labels)
+  );
 }
 /** 위치 쿼리 — 지명(place) 우선, 없으면 좌표. 둘 다 없으면 null. */
 function locQuery(a: Record<string, unknown>): string | null {
@@ -288,7 +300,11 @@ for (const t of TOOLS) {
   const orig = t.handler;
   t.handler = async (a) => {
     try { return await orig(a); }
-    catch (e) { const md = locFallbackMd(a, e); if (md) return md; throw e; }
+    catch (e) {
+      if ((e as { ambiguous?: unknown })?.ambiguous) return clarifyMd((e as { ambiguous: any }).ambiguous); // 헷갈리는 지명 → 되묻기
+      const md = locFallbackMd(a, e); if (md) return md;
+      throw e;
+    }
   };
 }
 
