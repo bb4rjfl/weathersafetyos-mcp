@@ -1,0 +1,29 @@
+{
+  "name": "weathersafetyos-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WeatherSafetyOS MCP server — personal weather-safety assistant for Korea (real-time hazard assessment by location, occupation, age). Thin MCP over the deployed core Worker.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "lint:naming": "tsx scripts/lint-naming.ts",
+    "build": "npm run lint:naming && tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "stdio": "tsx src/stdio.ts",
+    "inspect": "npx -y @modelcontextprotocol/inspector",
+    "smoke": "tsx scripts/smoke.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.1.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
