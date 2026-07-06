@@ -171,7 +171,7 @@ export const TOOLS: ToolDef[] = [
     inputSchema: LOC_SCHEMA,
     handler: async (a) => {
       const q = locQuery(a); if (!q) return NEED_LOC;
-      const j = await callBackend(`/api/risk?${q}`);
+      const j = await callBackend(`/api/risk?${q}&llm=0`); // llm=0: 결정론적·빠름(MCP가 자체 렌더). Gemini 5~10s 지연 회피
       // 안전 원칙: 실시간 관측이 지연/미확인이면 "위험 없음"으로 오도하지 말고 명확히 보류 안내
       const noObs = j.sources?.ncst === "unavailable" || !Number.isFinite(j.weather?.feelsLikeC);
       const hasActiveWarn = (j.warning?.active ?? []).length > 0;
@@ -224,7 +224,7 @@ export const TOOLS: ToolDef[] = [
       for (const k of ["feelsLikeC", "rain1hMm", "windMs", "waveM", "pm10", "lightningKm"]) if (Number.isFinite(Number(a[k]))) scenario[k] = Number(a[k]);
       if (scenario.feelsLikeC !== undefined) scenario.hour = 14.5;
       if (a.warning && a.warning !== "none") scenario.warnings = [{ hazard: a.warning, level: "warning" }];
-      const j = await callBackend(`/api/simulate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario, persona }) });
+      const j = await callBackend(`/api/simulate?llm=0`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario, persona }) });
       const md =
         `## 🧑 ${a.ageBand} ${OCC_KO[a.occupation as string] ?? a.occupation}${persona.chronic ? ` · ${persona.chronic}` : ""} @ ${j.location?.adminName ?? "서울"}\n` +
         `🌤️ ${j.weatherContext ?? ""}\n` +
@@ -245,7 +245,7 @@ export const TOOLS: ToolDef[] = [
       // 코어 무변경 재사용: 극한 시나리오를 주면 엔진이 최근접 쉼터를 카드에 첨부한다.
       const hot = a.kind === "cold" ? { feelsLikeC: -18, warnings: [{ hazard: "cold_wave", level: "warning" }] } : { feelsLikeC: 40, warnings: [{ hazard: "heatwave", level: "warning" }] };
       const loc: any = a.place && String(a.place).trim() ? { place: String(a.place).trim() } : { lat: Number(a.lat), lon: Number(a.lon) };
-      const j = await callBackend(`/api/simulate`, {
+      const j = await callBackend(`/api/simulate?llm=0`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ scenario: { ...hot, hour: 14.5 }, persona: { heg: "HEG-OUT-CONST", ageBand: "70-79", ...loc } }),
       });
@@ -277,7 +277,8 @@ export const TOOLS: ToolDef[] = [
       const heg = OCC_TO_HEG[(a.sector as string) ?? "farming"] ?? "HEG-OUT-AGRI";
       const sc = a.hazard === "cold" ? { feelsLikeC: -12, warnings: [{ hazard: "cold_wave", level: "warning" }] } : { feelsLikeC: 35, warnings: [{ hazard: "heatwave", level: "warning" }] };
       const loc: any = a.place && String(a.place).trim() ? { place: String(a.place).trim() } : { lat: Number(a.lat), lon: Number(a.lon) };
-      const j = await callBackend(`/api/simulate`, {
+      // impactLive=1 — 이 툴은 영향예보가 본질이라 캐시 미스 시 라이브 페치 허용(simulate는 캐시온리로 빠름)
+      const j = await callBackend(`/api/simulate?impactLive=1&llm=0`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ scenario: { ...sc, hour: 14.5 }, persona: { heg, ageBand: "60-69", ...loc } }),
       });
