@@ -6,11 +6,17 @@ import { BACKEND_URL, FETCH_TIMEOUT_MS, MAX_RESPONSE_CHARS } from "./constants.j
 
 // ── 공통 유틸 ────────────────────────────────────────────────────────
 const SERVICE = "Part of WeatherSafetyOS(웨더세이프티OS).";
+// 백엔드 호출자 — 기본은 공개 URL로 HTTP fetch(Node/KC 경로). Cloudflare Worker 경로에선
+// 같은 계정 워커끼리 workers.dev 호출이 라우팅 문제를 내므로, 서비스 바인딩 fetch로 교체(setBackendFetch).
+type BackendFetch = (path: string, init?: RequestInit) => Promise<Response>;
+let backendFetch: BackendFetch = (path, init) => fetch(`${BACKEND_URL}${path}`, init);
+export function setBackendFetch(fn: BackendFetch): void { backendFetch = fn; }
+
 async function callBackend(path: string, init?: RequestInit): Promise<any> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BACKEND_URL}${path}`, {
+    const res = await backendFetch(path, {
       ...init,
       signal: ctrl.signal,
       headers: { "user-agent": "WeatherSafetyOS-MCP/0.1", ...(init?.headers ?? {}) },

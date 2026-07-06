@@ -1,0 +1,12 @@
+{
+  // 즉시 공개 MCP 엔드포인트 (Cloudflare Workers) — PlayMCP 등록·테스트용.
+  // 배포: npx wrangler deploy → https://weathersafetyos-mcp.<subdomain>.workers.dev/mcp
+  // KC(Docker) 배포와 별개. 같은 tools.ts 공유, 코어 공개 Worker만 호출(키 미보유).
+  "name": "weathersafetyos-mcp",
+  "main": "src/mcp-worker.ts",
+  "compatibility_date": "2026-06-01",
+  "observability": { "enabled": true },
+  "vars": { "WSOS_BACKEND": "https://weathersafetyos.oneul-suncare.workers.dev" },
+  // 코어 워커 직접 호출(같은 계정 워커끼리 workers.dev 라우팅 문제 회피)
+  "services": [{ "binding": "CORE", "service": "weathersafetyos" }]
+}
