@@ -100,7 +100,7 @@ function legalBasis(harm: string, severity: string, w: any): string | null {
   if ((SEV_RANK[severity] ?? 0) < 3) return null; // 보통 미만은 생략(과잉 경고 방지)
   const f = Number(w?.feelsLikeC), wind = Number(w?.windMs);
   if (harm === "heat_illness" && Number.isFinite(f)) {
-    if (f >= 38) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 38℃는 **폭염 중대경보급 — 무더위시간대 옥외작업 중지 강력권고** 구간.";
+    if (f >= 38) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 38℃ 이상은 **폭염 중대경보급 — 무더위시간대 옥외작업 중지 강력권고** 구간.";
     if (f >= 35) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 35℃ 이상은 **14~17시 옥외작업 중지 권고** 구간.";
     if (f >= 33) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 33℃ 이상은 **매 2시간마다 20분 이상 휴식**(사업주 의무).";
   }
