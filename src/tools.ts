@@ -93,9 +93,30 @@ const OCC_KO: Record<string, string> = {
 };
 const AGE_BANDS = ["0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"] as const;
 
+// 법정 작업중지·휴식 기준을 실제 수치로 명시(감사 가능한 근거 사슬 = 대상 차별점).
+// SRC: EV-0018 폭염 체감온도 작업중지(산업안전보건규칙 §558·559) · EV-0085 강풍(§37·§383). 심각도 보통↑에서만 노출.
+const SEV_RANK: Record<string, number> = { extreme: 5, high: 4, moderate: 3, low: 2, advisory: 1, info: 0 };
+function legalBasis(harm: string, severity: string, w: any): string | null {
+  if ((SEV_RANK[severity] ?? 0) < 3) return null; // 보통 미만은 생략(과잉 경고 방지)
+  const f = Number(w?.feelsLikeC), wind = Number(w?.windMs);
+  if (harm === "heat_illness" && Number.isFinite(f)) {
+    if (f >= 38) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 38℃는 **폭염 중대경보급 — 무더위시간대 옥외작업 중지 강력권고** 구간.";
+    if (f >= 35) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 35℃ 이상은 **14~17시 옥외작업 중지 권고** 구간.";
+    if (f >= 33) return "야외작업 법정기준(산업안전보건규칙 §559): 체감 33℃ 이상은 **매 2시간마다 20분 이상 휴식**(사업주 의무).";
+  }
+  if (harm === "wind_damage" && Number.isFinite(wind)) {
+    if (wind >= 15) return "법정 작업중지(산업안전보건규칙 §383·§37): 순간풍속 15m/s 초과 시 **철골작업·타워크레인 운전 중지**.";
+    if (wind >= 10) return "법정 작업중지(산업안전보건규칙 §383·§37): 순간풍속 10m/s 이상 시 **철골·타워크레인 설치/해체 작업 중지**.";
+  }
+  if (harm === "hypothermia" && Number.isFinite(f) && f <= -12) {
+    return "한파 대응(고용부 「한랭질환 예방 가이드」): 옥외작업 단축·온열 휴게시간 확보 권고.";
+  }
+  return null;
+}
 function renderItems(j: any): string {
   const items: any[] = j.items ?? (j.risk ? [{ risk: j.risk, card: j.card }] : []);
   if (!items.length) return "_지금 조건에서는 특별한 위험이 없습니다 — 평온한 상태예요._";
+  const w = j.weather;
   return items.map((it: any, i: number) => {
     const r = it.risk, card = it.card;
     const head = `**${i === 0 ? "주위험" : "동반"} · ${SEV_KO[r.severity] ?? r.severity} · ${HARM_KO[r.harm] ?? r.harm}**`;
@@ -106,6 +127,8 @@ function renderItems(j: any): string {
       lines.push(`- ${b && !b.startsWith(t) ? `${t} — ${b}` : b || t}`);
     }
     if (r.drivers?.length) lines.push(`- _근거: ${r.drivers.slice(0, 3).join(" · ")}_`);
+    const lb = i === 0 ? legalBasis(r.harm, r.severity, w) : null; // 주위험에만 법령 근거
+    if (lb) lines.push(`- ⚖️ ${lb}`);
     const sh = r.action?.shelter;
     if (sh) lines.push(`- 🏠 최근접 대피: **${sh.name}** (도보 ${sh.walkMin}분) — [지도](${sh.mapLink ?? ""})`);
     return lines.join("\n");
