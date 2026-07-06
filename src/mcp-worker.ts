@@ -45,8 +45,14 @@ async function handleRpc(msg: any): Promise<any | null> {
     case "tools/call": {
       const tool = TOOLS.find((t) => t.name === params?.name);
       if (!tool) return err(id, -32602, `unknown tool: ${params?.name}`);
+      // 서버측 입력 검증(방어) — 필수 누락·enum 위반을 렌더 전에 차단(P5/P6). 클라이언트가 이미 스키마 검증하지만 이중 방어.
+      const parsed = z.object(tool.inputSchema).safeParse(params?.arguments ?? {});
+      if (!parsed.success) {
+        const msg = parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ");
+        return ok(id, { content: [{ type: "text", text: `⚠️ 입력값을 확인해 주세요 — ${msg}` }], isError: true });
+      }
       try {
-        const text = await tool.handler(params?.arguments ?? {});
+        const text = await tool.handler(parsed.data as Record<string, unknown>);
         return ok(id, { content: [{ type: "text", text }] });
       } catch (e) {
         const msgTxt = e instanceof Error && e.name === "AbortError" ? "요청이 지연되어 응답하지 못했어요. 잠시 후 다시 시도해 주세요." : `일시적 오류: ${e instanceof Error ? e.message : String(e)}`;

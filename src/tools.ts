@@ -109,6 +109,17 @@ export const TOOLS: ToolDef[] = [
     inputSchema: { lat: z.number().describe("위도 (예: 37.5665)"), lon: z.number().describe("경도 (예: 126.9780)") },
     handler: async (a) => {
       const j = await callBackend(`/api/risk?lat=${Number(a.lat)}&lon=${Number(a.lon)}`);
+      // 안전 원칙: 실시간 관측이 지연/미확인이면 "위험 없음"으로 오도하지 말고 명확히 보류 안내
+      const noObs = j.sources?.ncst === "unavailable" || !Number.isFinite(j.weather?.feelsLikeC);
+      const hasActiveWarn = (j.warning?.active ?? []).length > 0;
+      if (noObs && !hasActiveWarn && !(j.items ?? []).length) {
+        return guard(
+          `## 📍 ${j.location?.adminName ?? `${a.lat}, ${a.lon}`}\n` +
+          `🌤️ 실시간 기상 관측이 잠시 지연되고 있어, 지금은 위험도를 확정하지 못했어요. 잠시 후 다시 확인해 주세요.\n\n` +
+          `_생명에 위급한 상황이면 지체 없이 119._` +
+          chips("다시 확인", "이 근처 대피소 찾기"),
+        );
+      }
       const md =
         `## 📍 ${j.location?.adminName ?? `${a.lat}, ${a.lon}`}\n` +
         `🌤️ ${j.weatherContext ?? ""}\n\n` +
@@ -208,12 +219,14 @@ export const TOOLS: ToolDef[] = [
       });
       const oi = j.officialImpact;
       if (!oi) return guard(`## 🏛️ 기상청 공식 영향예보\n📍 ${j.location?.adminName ?? ""}\n\n현재 이 지역에 발효 중인 ${a.hazard === "cold" ? "한파" : "폭염"} 영향예보가 없습니다(비시즌이거나 영향없음 단계).` + chips("지금 이 위치 위험도 보기"));
+      // 관심 직업이 '보건(일반인)' 자체면 일반인 라인과 중복 → 한 줄로. 그 외 직업이면 대비용으로 일반인 라인 병기.
+      const isGeneralSector = oi.sectorName.includes("일반인");
       const md =
         `## 🏛️ 기상청 공식 영향예보 — ${j.location?.adminName ?? ""}\n` +
         `(${a.hazard === "cold" ? "한파" : "폭염"}, 내일 기준)\n\n` +
         `- **${oi.sectorName}**: ${IMPACT_LV[oi.sectorLevel]}\n` +
-        `- 일반인(보건): ${IMPACT_LV[oi.generalLevel]}\n` +
-        (oi.vulnerableLevel != null ? `- 보건 취약인: ${IMPACT_LV[oi.vulnerableLevel]}\n` : "") +
+        (isGeneralSector ? "" : `- 일반인(보건): ${IMPACT_LV[oi.generalLevel]}\n`) +
+        (oi.vulnerableLevel != null && !isGeneralSector ? `- 보건 취약인: ${IMPACT_LV[oi.vulnerableLevel]}\n` : "") +
         `\n${oi.sectorLevel !== oi.generalLevel ? "> 같은 기상인데 기상청도 **직업 분야마다 등급이 다릅니다**. WeatherSafetyOS는 이 구역 등급을 넘어 ‘지금 그 자리의 당신’에게 도달합니다." : ""}` +
         chips("이 직업의 개인 위험 시뮬레이션", "지금 실제 위험 보기");
       return guard(md);
