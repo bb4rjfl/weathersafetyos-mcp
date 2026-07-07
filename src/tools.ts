@@ -31,6 +31,8 @@ async function callBackend(path: string, init?: RequestInit): Promise<any> {
   }
 }
 function guard(md: string): string {
+  // 실시간 관측 지연 시 수치가 NaN일 수 있음 → 사용자에게 "NaN" 노출 금지, 관측지연 표현으로 살균(전 harm 공통)
+  md = md.replace(/(체감\s*)?NaN\s*(℃|m\/s|mm|cm|㎍\/㎥|%)?/g, "관측 지연");
   return md.length > MAX_RESPONSE_CHARS ? md.slice(0, MAX_RESPONSE_CHARS) + "\n\n… (이하 생략)" : md;
 }
 /** 백엔드가 헷갈리는 지명이라고 응답(ambiguous)하면 어디인지 되묻는다(+GPS 안내). 후보 라벨을 칩으로. */
