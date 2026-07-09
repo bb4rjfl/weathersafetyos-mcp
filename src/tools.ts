@@ -5,7 +5,9 @@ import { z, type ZodRawShape } from "zod";
 import { BACKEND_URL, FETCH_TIMEOUT_MS, MAX_RESPONSE_CHARS } from "./constants.js";
 
 // ── 공통 유틸 ────────────────────────────────────────────────────────
-const SERVICE = "Part of WeatherSafetyOS(웨더세이프티OS).";
+// ⚠️ 심사 규칙(Agentic Player 10): 각 툴 description에 등록 서비스명 전체("웨더세이프티OS · 개인 기상안전")를 포함해야 함.
+// "웨더세이프티OS"만으론 반려됨 → 정식명 그대로 포함.
+const SERVICE = "Part of the WeatherSafetyOS service (웨더세이프티OS · 개인 기상안전).";
 // 백엔드 호출자 — 기본은 공개 URL로 HTTP fetch(Node/KC 경로). Cloudflare Worker 경로에선
 // 같은 계정 워커끼리 workers.dev 호출이 라우팅 문제를 내므로, 서비스 바인딩 fetch로 교체(setBackendFetch).
 type BackendFetch = (path: string, init?: RequestInit) => Promise<Response>;
